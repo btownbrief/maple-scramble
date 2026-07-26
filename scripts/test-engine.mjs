@@ -131,4 +131,34 @@ ok('day numbering starts at #1 on the epoch', () => {
   assert.equal(dayNumber('2026-08-01'), 7);
 });
 
+ok('civil-date arithmetic matches the former Date.parse algorithm from 2026–2036', () => {
+  const oldDayNumber = (date, epoch = '2026-07-26') =>
+    Math.round(
+      (Date.parse(`${date}T12:00:00Z`) - Date.parse(`${epoch}T12:00:00Z`)) / 86400000,
+    ) + 1;
+  for (let year = 2026; year <= 2036; year++) {
+    for (const monthDay of ['01-01', '02-28', '03-01', '07-26', '12-31']) {
+      const date = `${year}-${monthDay}`;
+      assert.equal(dayNumber(date), oldDayNumber(date), date);
+    }
+  }
+  assert.equal(dayNumber('2028-02-29'), oldDayNumber('2028-02-29'));
+  assert.equal(dayNumber('2032-02-29'), oldDayNumber('2032-02-29'));
+  assert.equal(dayNumber('2036-02-29'), oldDayNumber('2036-02-29'));
+});
+
+ok('sample rack outputs are unchanged', () => {
+  const expected = {
+    '2026-07-26': ['A', 'A', 'C', 'E', 'L', 'L', 'M', 'O', 'P', 'R', 'R', 'T', 'U', 'V', 'W', 'Z'],
+    '2026-12-31': ['A', 'B', 'D', 'E', 'F', 'F', 'I', 'I', 'J', 'K', 'N', 'O', 'O', 'V', 'Y', 'Y'],
+    '2027-01-01': ['A', 'A', 'D', 'E', 'E', 'F', 'H', 'H', 'I', 'I', 'N', 'N', 'O', 'S', 'S', 'U'],
+    '2028-02-29': ['B', 'D', 'E', 'E', 'H', 'K', 'L', 'N', 'O', 'O', 'Q', 'R', 'S', 'S', 'U', 'U'],
+    '2030-06-15': ['A', 'D', 'E', 'F', 'F', 'I', 'J', 'N', 'O', 'O', 'P', 'R', 'R', 'T', 'T', 'U'],
+    '2036-12-31': ['A', 'C', 'E', 'E', 'G', 'I', 'I', 'L', 'N', 'O', 'O', 'P', 'S', 'T', 'U', 'U'],
+  };
+  for (const [date, rack] of Object.entries(expected)) {
+    assert.deepEqual(rackForDate(date), rack, date);
+  }
+});
+
 console.log(`\nAll ${n} engine tests passed.`);

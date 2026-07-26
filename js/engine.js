@@ -77,10 +77,25 @@ export function rackForDate(dateStr) {
 // ------------------------------------------------------------ day number
 // #1 = launch day; used for the share text, wordle-style.
 export const EPOCH = '2026-07-26';
+
+// Integer day on the proleptic Gregorian calendar. The constant offset is
+// irrelevant because dayNumber only subtracts two civil dates.
+function civilDay(dateStr) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!match) throw new RangeError(`Invalid date: ${dateStr}`);
+  let year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  year -= month <= 2 ? 1 : 0;
+  const era = Math.floor(year / 400);
+  const yearOfEra = year - era * 400;
+  const dayOfYear = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+  return era * 146097 + yearOfEra * 365 + Math.floor(yearOfEra / 4)
+    - Math.floor(yearOfEra / 100) + dayOfYear;
+}
+
 export function dayNumber(dateStr, epoch = EPOCH) {
-  return Math.round(
-    (Date.parse(dateStr + 'T12:00:00Z') - Date.parse(epoch + 'T12:00:00Z')) / 86400000,
-  ) + 1;
+  return civilDay(dateStr) - civilDay(epoch) + 1;
 }
 
 // ------------------------------------------------------------ grid model

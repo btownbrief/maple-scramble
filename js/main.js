@@ -50,6 +50,8 @@ let started = false;             // first tile has been placed
 let elapsedMs = 0;
 let solveMs = 0;
 let lastTick = 0;
+let lastDateCheck = 0;
+let dayRolledOver = false;
 
 const letterGrid = () =>
   Object.fromEntries(Object.entries(placed).map(([k, t]) => [k, t.letter]));
@@ -65,17 +67,34 @@ async function boot() {
   updateFit(true);
   paintValidity();
   renderTimer();
-  const res = await fetch('data/words.txt');
-  dict = new Set((await res.text()).split('\n').map((w) => w.trim()).filter(Boolean));
-  paintValidity(); // re-check in case a restored board was waiting on the dictionary
+  void retryPendingSubmit();
+  await loadDictionary();
+}
+
+async function loadDictionary() {
+  $('dictErrorOverlay').classList.add('hidden');
+  try {
+    const res = await fetch('data/words.txt');
+    if (!res.ok) throw new Error(`Dictionary request failed: ${res.status}`);
+    dict = new Set((await res.text()).split('\n').map((w) => w.trim()).filter(Boolean));
+    paintValidity(); // re-check in case a restored board was waiting on the dictionary
+    checkWin();
+  } catch {
+    dict = null;
+    paintValidity();
+    $('dictErrorOverlay').classList.remove('hidden');
+  }
 }
 
 // ------------------------------------------------------------ persistence
 const STATE_KEY = 'ms-state';
 function save() {
   if (TEST_DATE) return;
+  const savedPlaced = drag?.source.type === 'board'
+    ? { ...placed, [drag.source.k]: drag.tile }
+    : placed;
   localStorage.setItem(STATE_KEY, JSON.stringify({
-    date: TODAY, placed, tray, started, elapsedMs, status, solveMs,
+    date: TODAY, placed: savedPlaced, tray, started, elapsedMs, status, solveMs,
   }));
 }
 function restore(rack) {
@@ -106,8 +125,13 @@ function restore(rack) {
 
 // ------------------------------------------------------------ timer
 setInterval(() => {
-  if (status !== 'playing' || !started) return;
   const now = Date.now();
+  if (!TEST_DATE && now - lastDateCheck >= 1000) {
+    lastDateCheck = now;
+    if (nyDateStr(new Date(now)) !== TODAY) showDayRollover();
+  }
+  if (dayRolledOver) return;
+  if (status !== 'playing' || !started) return;
   if (document.visibilityState === 'visible' && lastTick) {
     // cap the step so a throttled background tab can't dump hidden time
     // into the clock — the timer only counts while you're looking at it
@@ -118,6 +142,15 @@ setInterval(() => {
   if (Math.floor(elapsedMs / 3000) !== Math.floor((elapsedMs - 200) / 3000)) save();
 }, 100);
 document.addEventListener('visibilitychange', () => { lastTick = Date.now(); });
+
+function showDayRollover() {
+  if (dayRolledOver) return;
+  dayRolledOver = true;
+  if (drag) onDragCancel();
+  save();
+  lastTick = 0;
+  $('dayOverlay').classList.remove('hidden');
+}
 
 function renderTimer() {
   $('timer').textContent = formatTime(status === 'done' ? solveMs : elapsedMs);
@@ -260,7 +293,7 @@ function setBucket(frac) {
 let drag = null;
 
 function startDrag(e, el, source) {
-  if (status === 'done' || drag) return;
+  if (status === 'done' || dayRolledOver || drag) return;
   e.preventDefault();
   const lift = e.pointerType === 'touch' ? 54 : 8;
   const ghost = el.cloneNode(true);
@@ -270,7 +303,10 @@ function startDrag(e, el, source) {
   ghost.style.height = `${size}px`;
   ghost.style.fontSize = '26px';
   document.body.appendChild(ghost);
-  drag = { source, ghost, lift, size, moved: false };
+  drag = {
+    source, ghost, lift, size, moved: false,
+    startX: e.clientX, startY: e.clientY,
+  };
   // The source element must stay in the DOM until the drop — removing it
   // would release pointer capture and kill the drag mid-flight. It just
   // goes translucent; every path out of the drag re-renders from state.
@@ -312,7 +348,9 @@ function moveGhost(e) {
 
 function onDragMove(e) {
   if (!drag) return;
-  drag.moved = true;
+  if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 6) {
+    drag.moved = true;
+  }
   moveGhost(e);
 }
 
@@ -332,7 +370,17 @@ function onDragCancel() {
 
 function onDragEnd(e) {
   if (!drag) return;
-  const { source, tile, cell } = drag;
+  const { source, tile, cell, moved } = drag;
+  if (!moved) {
+    if (source.type === 'board') placed[source.k] = tile;
+    endDragCleanup();
+    renderTray();
+    renderBoardTiles();
+    updateFit();
+    paintValidity();
+    save();
+    return;
+  }
   endDragCleanup();
   if (cell) {
     // place on the board
@@ -441,6 +489,7 @@ function showResults(fresh) {
     countdownTimer = setInterval(tick, 1000);
   }
   $('statsOverlay').classList.remove('hidden');
+  void retryPendingSubmit();
   updateLeaderboard(fresh);
 }
 
@@ -479,9 +528,13 @@ function toast(msg, ms = 1400) {
 $('helpBtn').addEventListener('click', () => $('helpOverlay').classList.remove('hidden'));
 $('statsBtn').addEventListener('click', () => showResults(false));
 document.querySelectorAll('.overlay').forEach((ov) => {
-  ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.add('hidden'); });
+  ov.addEventListener('click', (e) => {
+    if (e.target === ov && ov.dataset.static === undefined) ov.classList.add('hidden');
+  });
   ov.querySelector('[data-close]')?.addEventListener('click', () => ov.classList.add('hidden'));
 });
+$('dictRetryBtn').addEventListener('click', () => { void loadDictionary(); });
+$('reloadBtn').addEventListener('click', () => location.reload());
 
 // help-modal example: a tiny valid crossword
 (() => {
@@ -515,6 +568,60 @@ if (lbEnabled()) {
 }
 
 const SUBMIT_KEY = 'ms-lb-submitted';
+const PENDING_SUBMIT_KEY = 'ms-pending-submit';
+let pendingRetry = null;
+
+function storePendingSubmit(points) {
+  localStorage.setItem(PENDING_SUBMIT_KEY, JSON.stringify({ date: TODAY, points }));
+}
+
+function readPendingSubmit() {
+  try {
+    const pending = JSON.parse(localStorage.getItem(PENDING_SUBMIT_KEY));
+    if (!pending || typeof pending.date !== 'string' || !Number.isFinite(pending.points)) {
+      localStorage.removeItem(PENDING_SUBMIT_KEY);
+      return null;
+    }
+    return pending;
+  } catch {
+    localStorage.removeItem(PENDING_SUBMIT_KEY);
+    return null;
+  }
+}
+
+async function submitForCurrentPage(points) {
+  if (nyDateStr() !== TODAY) {
+    showDayRollover();
+    return false;
+  }
+  await submitScore(points);
+  return true;
+}
+
+function retryPendingSubmit() {
+  if (pendingRetry) return pendingRetry;
+  pendingRetry = (async () => {
+    const pending = readPendingSubmit();
+    if (!pending) return;
+    const currentDate = nyDateStr();
+    if (pending.date.slice(0, 7) !== currentDate.slice(0, 7)) {
+      localStorage.removeItem(PENDING_SUBMIT_KEY);
+      return;
+    }
+    if (TEST_DATE || !lbEnabled() || !getName() || currentDate !== TODAY) {
+      if (!TEST_DATE && currentDate !== TODAY) showDayRollover();
+      return;
+    }
+    try {
+      if (await submitForCurrentPage(pending.points)) {
+        localStorage.setItem(SUBMIT_KEY, pending.date);
+        localStorage.removeItem(PENDING_SUBMIT_KEY);
+      }
+    } catch { /* stay queued until the next retry trigger */ }
+  })().finally(() => { pendingRetry = null; });
+  return pendingRetry;
+}
+
 async function updateLeaderboard(fresh) {
   if (!lbEnabled()) return;
   const points = timeToPoints(solveMs);
@@ -530,9 +637,10 @@ async function updateLeaderboard(fresh) {
   }
   if (shouldSubmit) {
     try {
-      await submitScore(points);
-      localStorage.setItem(SUBMIT_KEY, TODAY);
-    } catch { /* offline — still show the board */ }
+      if (await submitForCurrentPage(points)) localStorage.setItem(SUBMIT_KEY, TODAY);
+    } catch {
+      storePendingSubmit(points);
+    }
   }
   renderBoard();
 }
@@ -571,10 +679,11 @@ $('lbSaveBtn').addEventListener('click', async () => {
   try {
     await renamePlayer(name);
     if (pending > 0) {
-      await submitScore(pending);
-      localStorage.setItem(SUBMIT_KEY, TODAY);
+      if (await submitForCurrentPage(pending)) localStorage.setItem(SUBMIT_KEY, TODAY);
     }
-  } catch { /* offline */ }
+  } catch {
+    if (pending > 0) storePendingSubmit(pending);
+  }
   renderBoard();
 });
 lbNameInput.addEventListener('keydown', (e) => {
@@ -599,5 +708,7 @@ lbLastBtn.addEventListener('click', () => {
   lbThisBtn.classList.remove('sel');
   renderBoard();
 });
+
+window.addEventListener('online', () => { void retryPendingSubmit(); });
 
 boot();

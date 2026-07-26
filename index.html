@@ -8,9 +8,13 @@
   <meta property="og:title" content="Maple Scramble" />
   <meta property="og:description" content="16 letters, one crossword, every day. How fast can you tap it? A Btown Games production." />
   <meta property="og:url" content="https://play.btownbrief.com/maple-scramble/" />
+  <meta property="og:image" content="https://play.btownbrief.com/maple-scramble/icon-180.png" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:image" content="https://play.btownbrief.com/maple-scramble/icon-180.png" />
   <meta name="theme-color" content="#241511" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon-180.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -52,6 +56,23 @@
   </main>
 
   <div id="tapped" class="hidden">TAPPED!</div>
+
+  <!-- Startup errors -->
+  <div class="overlay hidden" id="dictErrorOverlay" data-static>
+    <div class="modal small-modal">
+      <h2>Word list didn’t load</h2>
+      <p>Maple Scramble needs its dictionary to check your crossword.</p>
+      <button class="share-btn modal-action" id="dictRetryBtn">Retry</button>
+    </div>
+  </div>
+
+  <!-- New puzzle -->
+  <div class="overlay hidden" id="dayOverlay" data-static>
+    <div class="modal small-modal">
+      <h2>A new day’s puzzle is ready</h2>
+      <button class="share-btn modal-action" id="reloadBtn">Play today’s puzzle</button>
+    </div>
+  </div>
 
   <!-- How to play -->
   <div class="overlay hidden" id="helpOverlay">
@@ -103,11 +124,16 @@
         </div>
         <button class="tab lb-rename" id="lbRenameBtn">✏️ Change name</button>
       </div>
+      <div class="fleet-credit">
+        A <strong>Btown Games</strong> production ·
+        <a href="https://play.btownbrief.com/">More games →</a> ·
+        <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
+      </div>
     </div>
   </div>
 
   <footer>
-    A <strong>Btown Games</strong> production · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
+    A <strong>Btown Games</strong> production · <a href="https://play.btownbrief.com/">More games →</a> · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
   </footer>
 
   <script type="module" src="js/main.js"></script>
