@@ -29,3 +29,5 @@ Btown's daily 16-tile crossword sprint. Plain static site, **no build step**:
 Run `node scripts/test-engine.mjs` if you touched `js/engine.js`. For UI
 changes, load the page at a phone-sized viewport and do a real drag — the
 drag/snap feel is the whole game. Say what you verified.
+When touching the rack generator, also run `node scripts/test-solvable.mjs`;
+before mid-2028, extend its date range past 2028-07-26 and rerun it.

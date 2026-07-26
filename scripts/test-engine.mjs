@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import {
-  rackForDate, RACK_SIZE, key, isConnected, extractRuns, validate,
+  rackForDate, RACK_SIZE, RESALT, key, isConnected, extractRuns, validate,
   isSolved, timeToPoints, pointsToMs, dayNumber, normalize, bounds,
 } from '../js/engine.js';
 
@@ -156,7 +156,12 @@ ok('sample rack outputs are unchanged', () => {
     '2030-06-15': ['A', 'D', 'E', 'F', 'F', 'I', 'J', 'N', 'O', 'O', 'P', 'R', 'R', 'T', 'T', 'U'],
     '2036-12-31': ['A', 'C', 'E', 'E', 'G', 'I', 'I', 'L', 'N', 'O', 'O', 'P', 'S', 'T', 'U', 'U'],
   };
+  for (const [date, salt] of Object.entries(RESALT)) {
+    assert.match(date, /^\d{4}-\d{2}-\d{2}$/);
+    assert.ok(Number.isInteger(salt) && salt > 0, `${date} has an invalid salt`);
+  }
   for (const [date, rack] of Object.entries(expected)) {
+    assert.equal(RESALT[date], undefined, `${date} should remain unsalted`);
     assert.deepEqual(rackForDate(date), rack, date);
   }
 });

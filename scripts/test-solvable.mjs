@@ -1,5 +1,6 @@
 // Heuristic solvability sweep for MAPLE SCRAMBLE:
 //   node scripts/test-solvable.mjs
+//   node scripts/test-solvable.mjs --find-salts
 //
 // For each rack, seed a long word and greedily backtrack through legal
 // crossing-word attachments. This is intentionally a fast builder, not an
@@ -14,6 +15,7 @@ const END = '2028-07-26';
 const SEARCH_MS = 2000;
 const NODE_LIMIT = 200000;
 const MOVE_LIMIT = 120;
+const FIND_SALTS = process.argv.includes('--find-salts');
 
 const dictionaryWords = fs.readFileSync(new URL('../data/words.txt', import.meta.url), 'utf8')
   .split('\n')
@@ -184,18 +186,35 @@ const dayCount = Math.round(
   (Date.parse(`${END}T12:00:00Z`) - Date.parse(`${START}T12:00:00Z`)) / 86400000,
 ) + 1;
 const failures = [];
+const repairs = [];
 const startedAt = performance.now();
 for (let offset = 0; offset < dayCount; offset++) {
   const date = isoDateAt(offset);
-  const rack = rackForDate(date);
+  // Repair mode deliberately checks the original unsalted rack so it can
+  // reproduce RESALT even after the resulting entries ship in the engine.
+  const rack = rackForDate(date, FIND_SALTS ? null : undefined);
   if (!buildBoard(rack)) {
     failures.push(date);
     console.log(`FAIL ${date} ${rack.join('')}`);
+    if (FIND_SALTS) {
+      for (let salt = 1; ; salt++) {
+        const saltedRack = rackForDate(date, salt);
+        if (buildBoard(saltedRack)) {
+          repairs.push([date, salt]);
+          console.log(`FOUND ${date} salt ${salt} ${saltedRack.join('')}`);
+          break;
+        }
+      }
+    }
   }
 }
 
 const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
-if (failures.length) {
+if (FIND_SALTS) {
+  console.log('\nRESALT entries:');
+  for (const [date, salt] of repairs) console.log(`  '${date}': ${salt},`);
+  console.log(`\nFound salts for ${repairs.length} unsalted failures in ${seconds}s.`);
+} else if (failures.length) {
   console.error(`\n${failures.length} of ${dayCount} dates failed in ${seconds}s.`);
   process.exitCode = 1;
 } else {

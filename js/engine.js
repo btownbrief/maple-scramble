@@ -37,6 +37,23 @@ export const LETTER_DIST = {
 export const RACK_SIZE = 16;
 const VOWELS = new Set(['A', 'E', 'I', 'O', 'U']);
 
+// Dates whose default rack fails the offline solver get a deterministic reroll.
+// Players on every device still get identical racks because this map ships
+// with the code.
+export const RESALT = Object.freeze({
+  '2027-01-25': 1,
+  '2027-05-07': 1,
+  '2027-12-05': 1,
+  '2028-01-03': 1,
+  '2028-03-09': 1,
+  '2028-03-17': 1,
+  '2028-04-26': 1,
+  '2028-05-17': 1,
+  '2028-06-02': 1,
+  '2028-06-25': 2,
+  '2028-07-02': 1,
+});
+
 function fullBag() {
   const bag = [];
   for (const [ch, n] of Object.entries(LETTER_DIST)) {
@@ -51,9 +68,10 @@ function fullBag() {
 // has no "qi", so a U-less Q can strand the rack). Draws that break a rule
 // are redrawn with the attempt number folded into the seed, so the result
 // is still a pure function of the date string.
-export function rackForDate(dateStr) {
+export function rackForDate(dateStr, salt = RESALT[dateStr]) {
+  const seedDate = salt == null ? dateStr : `${dateStr}:${salt}`;
   for (let attempt = 0; ; attempt++) {
-    const rand = mulberry32(xmur3(`maple-scramble:${dateStr}:${attempt}`)());
+    const rand = mulberry32(xmur3(`maple-scramble:${seedDate}:${attempt}`)());
     const bag = fullBag();
     for (let i = bag.length - 1; i > 0; i--) {          // Fisher–Yates
       const j = Math.floor(rand() * (i + 1));

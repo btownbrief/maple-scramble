@@ -31,11 +31,20 @@ same for every player:
 3. The draw is rejected and deterministically redrawn (attempt number folded
    into the seed) unless it has **5–9 vowels** and, if it contains a **Q**,
    also a **U** — the word list has no "qi", so a U-less Q could strand you.
+4. If the default rack fails the offline crossword solver, its date gets a
+   small integer in `RESALT`; that salt is folded into the seed for a
+   deterministic reroll.
 
 Same date in → same rack out, on every device, with no server involved.
-The constraints keep every day solvable and humane; there is no explicit
-solver proof, but a Scrabble-weighted 16-letter rack with guaranteed vowels
-and no triple letters always has room to build.
+Dates without a `RESALT` entry keep their original seed and rack exactly.
+
+## Solvability sweep
+
+`node scripts/test-solvable.mjs` runs the greedy crossword builder against
+every daily rack in its date range, including any rerolls from `RESALT`.
+`node scripts/test-solvable.mjs --find-salts` rechecks unsalted defaults and
+prints the first passing salt for each failure. The committed sweep covers
+through **2028-07-26**; extend the range and rerun it before mid-2028.
 
 ## Dictionary
 
