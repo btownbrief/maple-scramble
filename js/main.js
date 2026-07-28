@@ -293,7 +293,15 @@ function setBucket(frac) {
 let drag = null;
 
 function startDrag(e, el, source) {
-  if (status === 'done' || dayRolledOver || drag) return;
+  // A previous gesture that never got its pointerup would leave `drag` set —
+  // with its tile lifted off the board — and freeze every tile in the game.
+  // Put that tile back and clear the drag before starting a new one.
+  if (drag) {
+    if (drag.source.type === 'board') placed[drag.source.k] = drag.tile;
+    endDragCleanup();
+    paintValidity();
+  }
+  if (status === 'done' || dayRolledOver) return;
   e.preventDefault();
   const lift = e.pointerType === 'touch' ? 54 : 8;
   const ghost = el.cloneNode(true);
@@ -304,12 +312,10 @@ function startDrag(e, el, source) {
   ghost.style.fontSize = '26px';
   document.body.appendChild(ghost);
   drag = {
-    source, ghost, lift, size, moved: false,
+    source, ghost, lift, size, el, moved: false,
+    pointerId: e.pointerId,
     startX: e.clientX, startY: e.clientY,
   };
-  // The source element must stay in the DOM until the drop — removing it
-  // would release pointer capture and kill the drag mid-flight. It just
-  // goes translucent; every path out of the drag re-renders from state.
   el.classList.add('ghosted');
   if (source.type === 'board') {
     drag.tile = placed[source.k];
@@ -318,11 +324,20 @@ function startDrag(e, el, source) {
   } else {
     drag.tile = tray.find((t) => t.id === source.id);
   }
-  try { el.setPointerCapture(e.pointerId); } catch { /* stale pointer id — drag still tracks via element events */ }
-  el.addEventListener('pointermove', onDragMove);
-  el.addEventListener('pointerup', onDragEnd);
-  el.addEventListener('pointercancel', onDragCancel);
+  try { el.setPointerCapture(e.pointerId); } catch { /* capture is a nicety, not the contract */ }
+  // The rest of the gesture is tracked on the window, never on the tile.
+  // Tiles are torn down and rebuilt by every render, and pointer capture can
+  // fail or be released mid-drag — either way the tile stops receiving events
+  // and a tile-bound pointerup would never arrive, hanging the board.
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', onDragEnd);
+  window.addEventListener('pointercancel', onDragCancel);
   moveGhost(e);
+}
+
+/* Ignore the other fingers: one pointer owns the drag from down to up. */
+function isDragPointer(e) {
+  return drag !== null && e.pointerId === drag.pointerId;
 }
 
 function moveGhost(e) {
@@ -347,7 +362,7 @@ function moveGhost(e) {
 }
 
 function onDragMove(e) {
-  if (!drag) return;
+  if (!isDragPointer(e)) return;
   if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 6) {
     drag.moved = true;
   }
@@ -355,12 +370,17 @@ function onDragMove(e) {
 }
 
 function endDragCleanup() {
+  window.removeEventListener('pointermove', onDragMove);
+  window.removeEventListener('pointerup', onDragEnd);
+  window.removeEventListener('pointercancel', onDragCancel);
   drag.ghost.remove();
+  drag.el.classList.remove('ghosted');
   $('dropCursor').classList.add('hidden');
   drag = null;
 }
 
-function onDragCancel() {
+function onDragCancel(e) {
+  if (e && !isDragPointer(e)) return;
   if (!drag) return;
   // put the tile back where it came from
   if (drag.source.type === 'board') placed[drag.source.k] = drag.tile;
@@ -369,7 +389,7 @@ function onDragCancel() {
 }
 
 function onDragEnd(e) {
-  if (!drag) return;
+  if (!isDragPointer(e)) return;
   const { source, tile, cell, moved } = drag;
   if (!moved) {
     if (source.type === 'board') placed[source.k] = tile;
