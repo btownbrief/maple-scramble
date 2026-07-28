@@ -16,6 +16,10 @@ Btown's daily 16-tile crossword sprint. Plain static site, **no build step**:
   string, or players on different devices get different puzzles mid-day. If you
   touch the generator or grid logic, update `scripts/test-engine.mjs` in the same
   change and run it (`node scripts/test-engine.mjs`).
+- **`data/common.txt` is a vendored frequency-ordered common-word list**
+  (intersected with ENABLE) that biases the give-up reveal solver
+  (`js/solver.js`) toward everyday words. Bulk data like `words.txt` — don't
+  hand-edit. If you touch the solver, run `node scripts/test-reveal.mjs`.
 - **`data/words.txt` is the vendored public-domain ENABLE list.** Bulk data, not
   logic — don't reformat, dedupe, or "clean" it by hand; validity of everyone's
   boards depends on it byte-for-byte.

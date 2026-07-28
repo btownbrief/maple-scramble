@@ -48,6 +48,7 @@
         <!-- placed tiles get appended here -->
       </div>
       <div id="firstHint" class="hidden">👇 drag a tile up here — build one crossword</div>
+      <button id="stuckBtn" class="stuck-btn hidden">I’m stuck 😵</button>
     </div>
     <div id="toast" class="hidden"></div>
     <div id="trayWrap">
@@ -71,6 +72,27 @@
     <div class="modal small-modal">
       <h2>A new day’s puzzle is ready</h2>
       <button class="share-btn modal-action" id="reloadBtn">Play today’s puzzle</button>
+    </div>
+  </div>
+
+  <!-- Give up: confirm, then reveal one solution -->
+  <div class="overlay hidden" id="stuckOverlay">
+    <div class="modal small-modal">
+      <button class="close" data-close>&times;</button>
+      <h2>See a solution?</h2>
+      <p>Every day’s letters can be tapped — want to see one way it works?</p>
+      <p class="fine">Peeking ends today’s run: no leaderboard time, and your streak takes the day off. The letters come back fresh at midnight.</p>
+      <button class="share-btn modal-action" id="revealBtn">Show me a solution</button>
+      <button class="tab keep-trying" data-close>Keep trying</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="revealOverlay">
+    <div class="modal small-modal">
+      <button class="close" data-close>&times;</button>
+      <h2>One way it worked</h2>
+      <div class="example" id="revealGrid"></div>
+      <p class="fine" id="revealNote">There were other ways too. Fresh letters at midnight — see you tomorrow 🍁</p>
     </div>
   </div>
 

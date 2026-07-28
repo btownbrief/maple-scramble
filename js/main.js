@@ -45,7 +45,8 @@ const CELL = 56;                 // plane units per grid cell
 let dict = null;                 // Set of valid words (lowercase)
 let tray = [];                   // [{id, letter}] still on the rack
 let placed = {};                 // 'x,y' -> {id, letter}
-let status = 'playing';          // playing | done
+let status = 'playing';          // playing | done | gaveup
+let reveal = null;               // 'x,y' -> 'A' solution grid once revealed
 let started = false;             // first tile has been placed
 let elapsedMs = 0;
 let solveMs = 0;
@@ -94,7 +95,7 @@ function save() {
     ? { ...placed, [drag.source.k]: drag.tile }
     : placed;
   localStorage.setItem(STATE_KEY, JSON.stringify({
-    date: TODAY, placed: savedPlaced, tray, started, elapsedMs, status, solveMs,
+    date: TODAY, placed: savedPlaced, tray, started, elapsedMs, status, solveMs, reveal,
   }));
 }
 function restore(rack) {
@@ -118,8 +119,10 @@ function restore(rack) {
   tray = st.tray || [];
   started = Boolean(st.started);
   elapsedMs = st.elapsedMs || 0;
-  status = st.status === 'done' ? 'done' : 'playing';
+  status = st.status === 'done' ? 'done' : st.status === 'gaveup' ? 'gaveup' : 'playing';
   solveMs = st.solveMs || 0;
+  reveal = st.reveal || null;
+  if (status === 'gaveup' && !reveal) status = 'playing'; // corrupt save — let them play
   if (status === 'done') setTimeout(() => showResults(false), 400);
 }
 
@@ -154,6 +157,7 @@ function showDayRollover() {
 
 function renderTimer() {
   $('timer').textContent = formatTime(status === 'done' ? solveMs : elapsedMs);
+  updateStuckBtn();
 }
 function fmtPrecise(ms) {
   return `${formatTime(ms)}.${Math.floor(ms / 100) % 10}`;
@@ -189,7 +193,7 @@ function updateFit(instant = false) {
   gl.style.backgroundSize = `${CELL}px ${CELL}px`;
   $('firstHint').classList.toggle(
     'hidden',
-    Object.keys(placed).length > 0 || status === 'done' || tray.length === 0,
+    Object.keys(placed).length > 0 || status !== 'playing' || tray.length === 0,
   );
 }
 window.addEventListener('resize', () => updateFit());
@@ -233,7 +237,7 @@ function renderBoardTiles() {
     el.style.width = `${CELL - 6}px`;
     el.style.height = `${CELL - 6}px`;
     el.style.fontSize = '27px';
-    if (status !== 'done') {
+    if (status === 'playing') {
       el.addEventListener('pointerdown', (e) => startDrag(e, el, { type: 'board', k }));
     }
     $('plane').appendChild(el);
@@ -260,6 +264,10 @@ function paintValidity() {
   setBucket(status === 'done' ? 1 : (goodTiles / RACK_SIZE) * (connected ? 1 : 0.85));
   if (status === 'done') {
     msg.textContent = `Tapped in ${fmtPrecise(solveMs)} — see you at midnight 🍁`;
+    return;
+  }
+  if (status === 'gaveup') {
+    msg.textContent = 'Solution revealed — new letters at midnight 🍁';
     return;
   }
   if (!started) {
@@ -293,7 +301,15 @@ function setBucket(frac) {
 let drag = null;
 
 function startDrag(e, el, source) {
-  if (status === 'done' || dayRolledOver || drag) return;
+  // A previous gesture that never got its pointerup would leave `drag` set —
+  // with its tile lifted off the board — and freeze every tile in the game.
+  // Put that tile back and clear the drag before starting a new one.
+  if (drag) {
+    if (drag.source.type === 'board') placed[drag.source.k] = drag.tile;
+    endDragCleanup();
+    paintValidity();
+  }
+  if (status !== 'playing' || dayRolledOver) return;
   e.preventDefault();
   const lift = e.pointerType === 'touch' ? 54 : 8;
   const ghost = el.cloneNode(true);
@@ -304,12 +320,10 @@ function startDrag(e, el, source) {
   ghost.style.fontSize = '26px';
   document.body.appendChild(ghost);
   drag = {
-    source, ghost, lift, size, moved: false,
+    source, ghost, lift, size, el, moved: false,
+    pointerId: e.pointerId,
     startX: e.clientX, startY: e.clientY,
   };
-  // The source element must stay in the DOM until the drop — removing it
-  // would release pointer capture and kill the drag mid-flight. It just
-  // goes translucent; every path out of the drag re-renders from state.
   el.classList.add('ghosted');
   if (source.type === 'board') {
     drag.tile = placed[source.k];
@@ -318,11 +332,20 @@ function startDrag(e, el, source) {
   } else {
     drag.tile = tray.find((t) => t.id === source.id);
   }
-  try { el.setPointerCapture(e.pointerId); } catch { /* stale pointer id — drag still tracks via element events */ }
-  el.addEventListener('pointermove', onDragMove);
-  el.addEventListener('pointerup', onDragEnd);
-  el.addEventListener('pointercancel', onDragCancel);
+  try { el.setPointerCapture(e.pointerId); } catch { /* capture is a nicety, not the contract */ }
+  // The rest of the gesture is tracked on the window, never on the tile.
+  // Tiles are torn down and rebuilt by every render, and pointer capture can
+  // fail or be released mid-drag — either way the tile stops receiving events
+  // and a tile-bound pointerup would never arrive, hanging the board.
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', onDragEnd);
+  window.addEventListener('pointercancel', onDragCancel);
   moveGhost(e);
+}
+
+/* Ignore the other fingers: one pointer owns the drag from down to up. */
+function isDragPointer(e) {
+  return drag !== null && e.pointerId === drag.pointerId;
 }
 
 function moveGhost(e) {
@@ -347,7 +370,7 @@ function moveGhost(e) {
 }
 
 function onDragMove(e) {
-  if (!drag) return;
+  if (!isDragPointer(e)) return;
   if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 6) {
     drag.moved = true;
   }
@@ -355,12 +378,17 @@ function onDragMove(e) {
 }
 
 function endDragCleanup() {
+  window.removeEventListener('pointermove', onDragMove);
+  window.removeEventListener('pointerup', onDragEnd);
+  window.removeEventListener('pointercancel', onDragCancel);
   drag.ghost.remove();
+  drag.el.classList.remove('ghosted');
   $('dropCursor').classList.add('hidden');
   drag = null;
 }
 
-function onDragCancel() {
+function onDragCancel(e) {
+  if (e && !isDragPointer(e)) return;
   if (!drag) return;
   // put the tile back where it came from
   if (drag.source.type === 'board') placed[drag.source.k] = drag.tile;
@@ -369,7 +397,7 @@ function onDragCancel() {
 }
 
 function onDragEnd(e) {
-  if (!drag) return;
+  if (!isDragPointer(e)) return;
   const { source, tile, cell, moved } = drag;
   if (!moved) {
     if (source.type === 'board') placed[source.k] = tile;
@@ -435,6 +463,83 @@ function celebrate() {
     document.body.appendChild(leaf);
     setTimeout(() => leaf.remove(), 5200);
   }
+}
+
+// ------------------------------------------------------------ give up → reveal
+// Solvability is guaranteed (every shipped rack passed the offline sweep),
+// so a stuck player is stuck on arrangement, not letters. After a few
+// minutes they can trade today's leaderboard run for one revealed board —
+// built by js/solver.js in a worker, biased toward everyday words.
+const STUCK_AFTER_MS = TEST_DATE ? 0 : 3 * 60000;
+
+function updateStuckBtn() {
+  const btn = $('stuckBtn');
+  if (status === 'gaveup') {
+    btn.textContent = 'See the solution 👀';
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.toggle(
+      'hidden',
+      status !== 'playing' || !started || dayRolledOver || elapsedMs < STUCK_AFTER_MS,
+    );
+  }
+}
+
+$('stuckBtn').addEventListener('click', () => {
+  if (status === 'gaveup') showReveal();
+  else $('stuckOverlay').classList.remove('hidden');
+});
+
+$('revealBtn').addEventListener('click', () => {
+  const btn = $('revealBtn');
+  btn.classList.add('working');
+  btn.textContent = 'Boiling one up…';
+  const worker = new Worker('js/reveal-worker.js', { type: 'module' });
+  const finish = (grid) => {
+    worker.terminate();
+    btn.classList.remove('working');
+    btn.textContent = 'Show me a solution';
+    if (!grid) {
+      $('stuckOverlay').classList.add('hidden');
+      toast('Couldn’t build one right now — keep at it!', 2200);
+      return;
+    }
+    if (drag) onDragCancel();
+    reveal = normalize(grid);
+    status = 'gaveup';
+    save();
+    renderTray(); renderBoardTiles(); paintValidity(); updateFit(); updateStuckBtn();
+    $('stuckOverlay').classList.add('hidden');
+    showReveal();
+  };
+  worker.onmessage = ({ data }) => finish(data.grid);
+  worker.onerror = () => finish(null);
+  worker.postMessage({ rack: rackForDate(TODAY) });
+});
+
+function showReveal() {
+  const box = $('revealGrid');
+  box.innerHTML = '';
+  const b = bounds(reveal);
+  if (!b) return;
+  const cols = b.maxX + 1;
+  const size = Math.min(34, Math.floor(280 / cols));
+  for (let y = 0; y <= b.maxY; y++) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    for (let x = 0; x <= cols - 1; x++) {
+      const ch = reveal[key(x, y)];
+      const cell = document.createElement('div');
+      cell.className = ch === undefined ? 'cell' : 'tile';
+      if (ch !== undefined) cell.textContent = ch;
+      cell.style.width = `${size}px`;
+      cell.style.height = `${size}px`;
+      cell.style.fontSize = `${Math.round(size * 0.55)}px`;
+      row.appendChild(cell);
+    }
+    box.appendChild(row);
+  }
+  $('revealOverlay').classList.remove('hidden');
 }
 
 // ------------------------------------------------------------ stats + streak
