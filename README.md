@@ -46,6 +46,18 @@ every daily rack in its date range, including any rerolls from `RESALT`.
 prints the first passing salt for each failure. The committed sweep covers
 through **2028-07-26**; extend the range and rerun it before mid-2028.
 
+## Give up → reveal
+
+After three minutes of play an **"I'm stuck"** pill appears on the board.
+Giving up forfeits the day (no leaderboard time, no streak credit) and shows
+**one** valid full board, built on the spot by `js/solver.js` in a Web Worker
+(`js/reveal-worker.js`) — the same builder as the solvability sweep, but
+biased toward everyday words via `data/common.txt` (a frequency-ordered list
+of common English words intersected with ENABLE) so the reveal reads as
+"oh, I see" rather than a wall of Scrabble obscurities.
+`node scripts/test-reveal.mjs` samples racks across the shipped range and
+asserts the reveal solver cracks them all (currently ~92% everyday words).
+
 ## Dictionary
 
 `data/words.txt` is the **ENABLE** word list (172,823 words), vendored

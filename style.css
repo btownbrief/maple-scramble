@@ -92,6 +92,25 @@ header h1 span { color: var(--accent); }
 .status-msg.warn { color: #f0b45f; }
 .status-msg.bad { color: var(--bad); }
 .bucket { width: 34px; height: 41px; flex: none; }
+
+/* Give-up pill: floats in the board's corner once the player has been at
+   it a while; never competes with the tiles. */
+.stuck-btn {
+  position: absolute;
+  top: 8px; right: 8px;
+  z-index: 5;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.stuck-btn:active { background: var(--panel); }
+.stuck-btn.working { opacity: 0.6; pointer-events: none; }
+.keep-trying { display: block; width: 100%; margin-top: 8px; min-height: 38px; }
 #sap { transition: y 0.5s ease, height 0.5s ease; }
 #drip { animation: drip 0.9s ease-in infinite; }
 @keyframes drip {
