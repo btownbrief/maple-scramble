@@ -29,8 +29,18 @@ Btown's daily 16-tile crossword sprint. Plain static site, **no build step**:
   submit raw times. The public anon key can only call security-definer RPCs;
   never put a service-role key or secret in client JS.
 
+## Duels (⚔️ race a friend)
+This repo is the CANONICAL reference for the fleet's async-duel pattern —
+see `DUEL-INTEGRATION.md`. `js/duel.js` is canonical HERE; `js/rooms.js`
+and `scripts/rooms-shim.mjs` are vendored from four-in-a-rowboat (change
+them there, re-vendor). Duel boards are archive dates inside the verified
+window via `?duel=1&testdate=…`, so every existing `TEST_DATE` guard keeps
+daily saves/stats/streak/leaderboard untouched — preserve that property.
+
 ## Before you finish
-Run `node scripts/test-engine.mjs` if you touched `js/engine.js`. For UI
+Run `node scripts/test-engine.mjs` if you touched `js/engine.js`. If you
+touched duel.js, rooms.js, or the duel section of main.js, run
+`node scripts/test-duel.mjs`. For UI
 changes, load the page at a phone-sized viewport and do a real drag — the
 drag/snap feel is the whole game. Say what you verified.
 When touching the rack generator, also run `node scripts/test-solvable.mjs`;

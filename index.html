@@ -21,9 +21,13 @@
   <header>
     <button class="icon-btn" id="helpBtn" aria-label="How to play">?</button>
     <h1>MAPLE <span>SCRAMBLE</span></h1>
-    <button class="icon-btn" id="statsBtn" aria-label="Statistics">📊</button>
+    <div class="hdr-btns">
+      <button class="icon-btn" id="duelBtn" aria-label="Race a friend">⚔️</button>
+      <button class="icon-btn" id="statsBtn" aria-label="Statistics">📊</button>
+    </div>
   </header>
   <div class="daybar" id="dayBar"></div>
+  <div class="duelbar hidden" id="duelBar"></div>
 
   <div class="statusbar">
     <div class="timer" id="timer">0:00</div>
@@ -157,6 +161,53 @@
   <footer>
     A <strong>Btown Games</strong> production · <a href="https://play.btownbrief.com/">More games →</a> · <a href="https://www.btownbrief.com" target="_blank" rel="noopener">Read the BTown Brief →</a>
   </footer>
+
+  <!-- Duel: race a friend on the same board -->
+  <div class="overlay hidden" id="duelOverlay">
+    <div class="modal small-modal">
+      <button class="close" data-close>&times;</button>
+      <h2>⚔️ Race a friend</h2>
+      <p>Same 16 tiles, two phones, fastest tap wins. Boards come from the
+        Scramble archive, so today's puzzle stays unspoiled.</p>
+      <button class="share-btn modal-action" id="hostBtn">🍁 Start a race — get a code</button>
+      <button class="share-btn modal-action" id="joinBtn">🔑 Join a race — type theirs in</button>
+      <button class="tab hidden" id="rejoinBtn"></button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="onlinePanel" data-static>
+    <div class="modal small-modal">
+      <h2 id="opTitle">Start a race</h2>
+      <label class="duel-label" for="opName">Your name</label>
+      <input class="duel-input" id="opName" maxlength="24" autocomplete="nickname" placeholder="Sprinter" />
+      <div id="opCodeWrap" class="hidden">
+        <label class="duel-label" for="opCode">Race code</label>
+        <input class="duel-input duel-code" id="opCode" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD" />
+      </div>
+      <p id="opError" class="fine duel-error hidden"></p>
+      <button class="share-btn modal-action" id="opGo">Go</button>
+      <button class="tab" id="opCancel">Back</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="lobby" data-static>
+    <div class="modal small-modal">
+      <h2>Read this code to your rival</h2>
+      <div id="lobbyCode"></div>
+      <p class="fine">They tap ⚔️ → <b>Join a race</b> and type it in.
+        The moment they do, both boards open.</p>
+      <button class="tab" id="lobbyCancel">Call it off</button>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="duelDone" data-static>
+    <div class="modal small-modal">
+      <h2 id="duelDoneHead"></h2>
+      <div id="duelDoneRows"></div>
+      <button class="share-btn modal-action" id="duelRematchBtn">↻ Rematch — new board</button>
+      <button class="tab" id="duelExitBtn">Back to today's puzzle</button>
+    </div>
+  </div>
 
   <script type="module" src="js/main.js"></script>
 </body>

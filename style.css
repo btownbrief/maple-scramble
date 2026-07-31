@@ -447,3 +447,62 @@ footer a, .fleet-credit a { color: var(--accent); text-decoration: none; }
 }
 
 .hidden { display: none !important; }
+
+/* ------------------------------------------------------------ duel mode */
+
+.hdr-btns { display: flex; gap: 6px; }
+
+.duelbar {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--maple, #d97516);
+  padding: 2px 8px 0;
+}
+
+.duel-label {
+  display: block;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  margin: 10px 0 4px;
+}
+.duel-input {
+  width: 100%;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: center;
+  border: 2px solid var(--line, #d9c9a8);
+  border-radius: 10px;
+  background: var(--panel, #fff);
+  color: inherit;
+}
+.duel-code { letter-spacing: 0.4em; text-indent: 0.4em; text-transform: uppercase; font-size: 24px; }
+.duel-error { color: #b3402a; font-weight: 700; }
+
+#lobbyCode {
+  font-size: 42px;
+  font-weight: 900;
+  letter-spacing: 0.35em;
+  text-indent: 0.35em;
+  color: var(--maple, #d97516);
+  padding: 8px 0 2px;
+}
+
+#duelDoneRows { margin: 10px 0 4px; }
+.duel-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+.duel-row.win { background: var(--panel-2, #f3e7cd); }
+.duel-row .duel-time { font-variant-numeric: tabular-nums; }

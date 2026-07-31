@@ -6,11 +6,17 @@
 import {
   rackForDate, RACK_SIZE, key, parseKey, bounds, normalize,
   isConnected, validate, isSolved, timeToPoints, pointsToMs,
-  formatTime, dayNumber,
+  formatTime, dayNumber, EPOCH,
 } from './engine.js';
 import {
   lbEnabled, getName, submitScore, renamePlayer, fetchTop, monthLabel, playerId,
 } from './leaderboard.js';
+import {
+  Duel,
+  getName as duelGetName,
+  savedSession as duelSavedSession,
+  clearSession as duelClearSession,
+} from './duel.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -438,7 +444,8 @@ function checkWin() {
   save();
   recordStats();
   celebrate();
-  setTimeout(() => showResults(true), 1900);
+  onDuelFinish(false); // no-op outside a race
+  if (!duelActive()) setTimeout(() => showResults(true), 1900);
 }
 
 function celebrate() {
@@ -507,6 +514,7 @@ $('revealBtn').addEventListener('click', () => {
     if (drag) onDragCancel();
     reveal = normalize(grid);
     status = 'gaveup';
+    onDuelFinish(true); // peeking loses the race (no-op outside one)
     save();
     renderTray(); renderBoardTiles(); paintValidity(); updateFit(); updateStuckBtn();
     $('stuckOverlay').classList.add('hidden');
@@ -817,3 +825,298 @@ lbLastBtn.addEventListener('click', () => {
 window.addEventListener('online', () => { void retryPendingSubmit(); });
 
 boot();
+
+// ------------------------------------------------------------ duel mode
+// ⚔️ Race a friend: same rack, two phones, fastest tap wins. Built on the
+// vendored js/duel.js (async duels — no turns, one result per seat) over
+// the fleet's shared rooms backend. Duel boards are archive dates inside
+// the solvability-verified window, never TODAY, so the daily stays
+// unspoiled — and because a duel page runs with ?testdate=…, all the
+// existing guards already keep saves, stats, streaks, and the monthly
+// leaderboard untouched.
+
+const DUEL_GAME = 'maple-scramble';
+const DUEL_VERIFIED_END = '2028-07-26'; // scripts/test-solvable.mjs sweep limit
+let duel = null;           // live Duel while hosting/racing
+let duelSubmitted = false;
+
+const duelActive = () =>
+  new URLSearchParams(location.search).get('duel') === '1' && duel !== null;
+
+function randomDuelDate() {
+  // Any verified archive day except today; dayNumber(TODAY) uses the real
+  // NY date even when this page itself is on a testdate.
+  const total = dayNumber(DUEL_VERIFIED_END);
+  const today = dayNumber(nyDateStr());
+  let n = Math.floor(Math.random() * total);
+  if (n === today) n = (n + 1) % total;
+  return new Date(Date.parse(EPOCH + 'T12:00:00Z') + n * 86400000)
+    .toISOString().slice(0, 10);
+}
+
+function duelUrl(date) {
+  return `?duel=1&testdate=${date}`;
+}
+
+const FRIENDLY_DUEL_ERRORS = {
+  not_found: 'No race with that code — double-check the letters.',
+  room_full: 'That race already started without you.',
+  room_started: 'That race already started without you.',
+  not_ready: "Online races aren't switched on yet — check back soon!",
+  offline: "Can't reach the sugarbush — are you online?",
+};
+function duelFriendly(err) {
+  if (err && err.code === 'wrong_game') {
+    return `That code is for ${String(err.detail || 'another game').replace(/-/g, ' ')} — head there to use it.`;
+  }
+  return (err && FRIENDLY_DUEL_ERRORS[err.code]) || 'Sticky sap — please try again.';
+}
+
+let duelPanelIntent = 'host';
+
+$('duelBtn').addEventListener('click', () => {
+  refreshDuelRejoin();
+  $('duelOverlay').classList.remove('hidden');
+});
+$('hostBtn').addEventListener('click', () => openDuelPanel('host'));
+$('joinBtn').addEventListener('click', () => openDuelPanel('join'));
+$('opCancel').addEventListener('click', () => $('onlinePanel').classList.add('hidden'));
+$('opGo').addEventListener('click', duelGo);
+$('lobbyCancel').addEventListener('click', cancelDuelLobby);
+$('rejoinBtn').addEventListener('click', rejoinDuel);
+$('duelRematchBtn').addEventListener('click', duelRematch);
+$('duelExitBtn').addEventListener('click', exitDuel);
+$('opCode').addEventListener('input', () => {
+  $('opCode').value = $('opCode').value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+});
+['opName', 'opCode'].forEach((id) => $(id).addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') duelGo();
+}));
+
+function openDuelPanel(intent) {
+  duelPanelIntent = intent;
+  $('duelOverlay').classList.add('hidden');
+  $('opTitle').textContent = intent === 'host' ? 'Start a race' : 'Join a race';
+  $('opGo').textContent = intent === 'host' ? 'Get a code' : 'Race!';
+  $('opCodeWrap').classList.toggle('hidden', intent === 'host');
+  $('opError').classList.add('hidden');
+  $('opName').value = $('opName').value || duelGetName();
+  $('onlinePanel').classList.remove('hidden');
+  (intent === 'join' && $('opName').value ? $('opCode') : $('opName')).focus();
+}
+
+async function duelGo() {
+  if ($('opGo').disabled) return; // Enter key can't double-submit
+  const name = $('opName').value.trim();
+  if (!name) {
+    $('opError').textContent = 'Every racer needs a name.';
+    $('opError').classList.remove('hidden');
+    $('opName').focus();
+    return;
+  }
+  $('opGo').disabled = true;
+  $('opError').classList.add('hidden');
+  try {
+    if (duelPanelIntent === 'host') {
+      const d = await Duel.create({
+        game: DUEL_GAME, name, payload: { date: randomDuelDate() },
+      });
+      $('onlinePanel').classList.add('hidden');
+      openDuelLobby(d);
+    } else {
+      const code = $('opCode').value.trim();
+      if (code.length !== 4) {
+        $('opError').textContent = 'The race code is 4 letters.';
+        $('opError').classList.remove('hidden');
+        $('opCode').focus();
+        return;
+      }
+      const d = await Duel.join({ game: DUEL_GAME, code, name });
+      location.href = duelUrl(d.payload.date); // board time — reconnects on load
+    }
+  } catch (err) {
+    $('opError').textContent = duelFriendly(err);
+    $('opError').classList.remove('hidden');
+  } finally {
+    $('opGo').disabled = false;
+  }
+}
+
+function openDuelLobby(d) {
+  if ($('lobby')._duel && $('lobby')._duel !== d) $('lobby')._duel.stop();
+  $('lobby')._duel = d;
+  $('lobbyCode').textContent = d.code;
+  $('lobby').classList.remove('hidden');
+  d.start({
+    onChange: () => {
+      if (d.status !== 'waiting') location.href = duelUrl(d.payload.date);
+    },
+    onError: () => {}, // lobby hiccups resolve on the next poll
+  });
+}
+
+function cancelDuelLobby() {
+  const d = $('lobby')._duel;
+  if (d) d.leave();
+  $('lobby')._duel = null;
+  $('lobby').classList.add('hidden');
+}
+
+function refreshDuelRejoin() {
+  const saved = duelSavedSession(DUEL_GAME);
+  const btn = $('rejoinBtn');
+  btn.classList.toggle('hidden', !saved || duelActive());
+  if (saved) btn.textContent = `↩ Rejoin your race (${saved.code})`;
+}
+
+async function rejoinDuel() {
+  $('rejoinBtn').disabled = true;
+  try {
+    const d = await Duel.resume({ game: DUEL_GAME });
+    if (d.status === 'waiting') {
+      $('duelOverlay').classList.add('hidden');
+      openDuelLobby(d);
+    } else {
+      location.href = duelUrl(d.payload.date);
+    }
+  } catch (err) {
+    // Only a race that's truly gone forfeits the session — a flaky
+    // connection must not delete the one path back in.
+    if (err && (err.code === 'not_found' || err.code === 'not_seated' || err.code === 'room_started')) {
+      duelClearSession(DUEL_GAME);
+      refreshDuelRejoin();
+    }
+  } finally {
+    $('rejoinBtn').disabled = false;
+  }
+}
+
+function exitDuel() {
+  if (duel) duel.leave();
+  location.replace(location.pathname); // back to the real daily
+}
+
+// ---- in-race wiring (this page IS a duel board: ?duel=1&testdate=D) ----
+
+function duelOpponent() {
+  return duel ? (duel.others()[0] || {}) : {};
+}
+
+function renderDuelBar() {
+  if (!duel) return;
+  const opp = duelOpponent();
+  const bar = $('duelBar');
+  bar.classList.remove('hidden');
+  const who = opp.name ? `vs ${opp.name}` : 'waiting for your rival';
+  let note = '';
+  if (opp.left && !duel.isComplete()) note = ' — they bailed! Solve it for glory.';
+  else if (duelSubmitted && !duel.isComplete()) note = ' — waiting on their time…';
+  bar.textContent = `⚔️ RACE ${duel.code} ${who}${note}`;
+}
+
+function showDuelDone() {
+  duel.stop();
+  const mine = duel.myResult();
+  const opp = duelOpponent();
+  const theirs = opp.result;
+  const fmt = (r) => (!r || r.gaveUp ? 'peeked 👀' : fmtPrecise(r.ms));
+  const bothPeeked = !!(mine && mine.gaveUp && theirs && theirs.gaveUp);
+  const iWin = (mine && !mine.gaveUp) && (!theirs || theirs.gaveUp || mine.ms < theirs.ms);
+  const tie = bothPeeked ||
+    (mine && theirs && !mine.gaveUp && !theirs.gaveUp && mine.ms === theirs.ms);
+  $('duelDoneHead').textContent =
+    bothPeeked ? 'BOTH PEEKED — CALL IT A DRAW 👀'
+    : tie ? 'DEAD HEAT! 🍁'
+    : iWin ? 'YOU WIN THE RACE! 🏆' : `${(opp.name || 'THEY').toUpperCase()} TAKES IT`;
+  const rows = $('duelDoneRows');
+  rows.innerHTML = '';
+  for (const [label, r, win] of [
+    ['You', mine, iWin || tie],
+    [opp.name || 'Rival', theirs, (!iWin && !tie) || tie],
+  ]) {
+    const row = document.createElement('div');
+    row.className = 'duel-row' + (win ? ' win' : '');
+    const name = document.createElement('span');
+    name.textContent = label;
+    const time = document.createElement('span');
+    time.className = 'duel-time';
+    time.textContent = fmt(r);
+    row.append(name, time);
+    rows.appendChild(row);
+  }
+  $('duelDone').classList.remove('hidden');
+}
+
+async function duelSubmit(result) {
+  duelSubmitted = true;
+  renderDuelBar();
+  try {
+    await duel.submitResult(result);
+  } catch (err) {
+    if (err && err.code === 'opponent_left') {
+      renderDuelBar();
+      return;
+    }
+    toast(duelFriendly(err), 2600);
+  }
+  if (duel.isComplete()) showDuelDone();
+}
+
+// Called from checkWin/give-up via the tiny hooks below.
+function onDuelFinish(gaveUp) {
+  if (!duelActive() || duelSubmitted) return;
+  void duelSubmit(gaveUp ? { gaveUp: true } : { ms: solveMs, points: timeToPoints(solveMs) });
+}
+
+async function bootDuel() {
+  const wantsDuel = new URLSearchParams(location.search).get('duel') === '1';
+  if (!wantsDuel) return;
+  try {
+    duel = await Duel.resume({ game: DUEL_GAME });
+  } catch {
+    location.replace(location.pathname); // race is gone — back to the daily
+    return;
+  }
+  if (duel.payload?.date !== TODAY) {
+    // rematch dealt a fresh board (or the URL was hand-mangled) — follow it
+    location.replace(duelUrl(duel.payload.date));
+    return;
+  }
+  duelSubmitted = duel.myResult() !== null;
+  renderDuelBar();
+  duel.start({
+    onChange: () => {
+      if (duel.payload?.date !== TODAY) {
+        location.replace(duelUrl(duel.payload.date)); // rival dealt a rematch
+        return;
+      }
+      renderDuelBar();
+      if (duel.isComplete()) showDuelDone();
+    },
+    onError: (err) => {
+      if (err && err.code === 'not_found') {
+        duelClearSession(DUEL_GAME);
+        location.replace(location.pathname);
+      }
+    },
+  });
+  if (duel.isComplete()) showDuelDone();
+}
+
+async function duelRematch() {
+  if (!duel) return;
+  $('duelRematchBtn').disabled = true;
+  try {
+    const date = randomDuelDate();
+    await duel.rematch({ date });
+    // Whether our deal landed or the rival's beat us to it, the truth is
+    // in the room now — follow whatever board it names.
+    location.href = duelUrl(duel.payload.date);
+  } catch (err) {
+    toast(duelFriendly(err), 2600);
+    $('duelRematchBtn').disabled = false;
+  }
+}
+
+void bootDuel();
+refreshDuelRejoin();
