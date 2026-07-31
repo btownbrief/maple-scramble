@@ -26,12 +26,18 @@
       <button class="icon-btn" id="statsBtn" aria-label="Statistics">📊</button>
     </div>
   </header>
-  <div class="daybar" id="dayBar"></div>
+  <div class="daybar-wrap">
+    <div class="daybar" id="dayBar"></div>
+    <button class="sound-toggle" id="soundBtn" aria-label="Turn sound on" aria-pressed="false">🔇</button>
+  </div>
   <div class="duelbar hidden" id="duelBar"></div>
 
   <div class="statusbar">
-    <div class="timer" id="timer">0:00</div>
-    <div class="status-msg" id="statusMsg">Drag a tile anywhere to start the clock</div>
+    <div class="timer-wrap">
+      <div class="timer" id="timer">0:00</div>
+      <div class="pace-ghost hidden" id="paceGhost"></div>
+    </div>
+    <button class="status-msg" id="statusMsg" type="button" aria-disabled="true" aria-live="polite" tabindex="-1">Drag a tile anywhere to start the clock</button>
     <svg class="bucket" id="bucket" viewBox="0 0 40 48" aria-label="Sap bucket fills as you build">
       <defs>
         <clipPath id="bucketClip"><path d="M7 14 L33 14 L30 44 L10 44 Z" /></clipPath>
@@ -49,6 +55,7 @@
       <div id="plane">
         <div id="gridlines"></div>
         <div id="dropCursor" class="hidden"></div>
+        <div id="badRunOutline" class="hidden" aria-hidden="true"></div>
         <!-- placed tiles get appended here -->
       </div>
       <div id="firstHint" class="hidden">👇 drag a tile up here — build one crossword</div>
@@ -61,6 +68,7 @@
   </main>
 
   <div id="tapped" class="hidden">TAPPED!</div>
+  <div id="newBestStamp" class="hidden" role="status" aria-live="polite">NEW BEST!</div>
 
   <!-- Startup errors -->
   <div class="overlay hidden" id="dictErrorOverlay" data-static>

@@ -1,6 +1,6 @@
 // MAPLE SCRAMBLE — UI layer only. All game rules live in js/engine.js
 // (pure, tested by scripts/test-engine.mjs); this file owns the DOM:
-// drag-and-drop, the count-up timer, live red-glow validation, the
+// drag-and-drop, the count-up timer, live validation, the
 // auto-fitting board camera, celebration, stats, share, leaderboard.
 
 import {
@@ -17,6 +17,7 @@ import {
   savedSession as duelSavedSession,
   clearSession as duelClearSession,
 } from './duel.js';
+import { sound } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -59,9 +60,25 @@ let solveMs = 0;
 let lastTick = 0;
 let lastDateCheck = 0;
 let dayRolledOver = false;
+let paceBestMs = 0;
+let newBestThisSolve = false;
 
 const letterGrid = () =>
   Object.fromEntries(Object.entries(placed).map(([k, t]) => [k, t.letter]));
+
+function renderSoundToggle() {
+  const btn = $('soundBtn');
+  btn.textContent = sound.enabled ? '🔊' : '🔇';
+  btn.setAttribute('aria-pressed', String(sound.enabled));
+  btn.setAttribute('aria-label', sound.enabled ? 'Turn sound off' : 'Turn sound on');
+}
+
+$('soundBtn').addEventListener('click', () => {
+  sound.setEnabled(!sound.enabled);
+  renderSoundToggle();
+  if (sound.enabled) sound.snap();
+});
+renderSoundToggle();
 
 // ------------------------------------------------------------ boot
 async function boot() {
@@ -69,6 +86,7 @@ async function boot() {
   const rack = rackForDate(TODAY).map((letter, i) => ({ id: `t${i}`, letter }));
   tray = rack;
   restore(rack);
+  paceBestMs = TEST_DATE ? 0 : (loadStats().best || 0);
   renderTray();
   renderBoardTiles();
   updateFit(true);
@@ -85,7 +103,8 @@ async function loadDictionary() {
     if (!res.ok) throw new Error(`Dictionary request failed: ${res.status}`);
     dict = new Set((await res.text()).split('\n').map((w) => w.trim()).filter(Boolean));
     paintValidity(); // re-check in case a restored board was waiting on the dictionary
-    checkWin();
+    seedConfirmedValidity();
+    checkWin({ effects: false });
   } catch {
     dict = null;
     paintValidity();
@@ -163,6 +182,15 @@ function showDayRollover() {
 
 function renderTimer() {
   $('timer').textContent = formatTime(status === 'done' ? solveMs : elapsedMs);
+  const ghost = $('paceGhost');
+  const showPace = paceBestMs > 0 && !TEST_DATE && status === 'playing';
+  ghost.classList.toggle('hidden', !showPace);
+  if (showPace) {
+    ghost.textContent = `best ${fmtPrecise(paceBestMs)}`;
+    ghost.classList.toggle('ahead', started && elapsedMs < paceBestMs);
+  } else {
+    ghost.classList.remove('ahead');
+  }
   updateStuckBtn();
 }
 function fmtPrecise(ms) {
@@ -250,45 +278,145 @@ function renderBoardTiles() {
   }
 }
 
-// Live validation paint: red-glow tiles in invalid runs, status message,
+// Live validation paint: one actionable outline around the first invalid run,
+// status message,
 // sap bucket level (valid, settled tiles fill the bucket).
-function paintValidity() {
+let confirmedRunStates = new Map();
+let confirmedValiditySeeded = false;
+let currentBadRun = null;
+let validFlashTimer = null;
+let validMessageTimer = null;
+let badFlashTimer = null;
+
+function runIdentity(run) {
+  return `${run.dir}:${run.cells.join('|')}`;
+}
+
+function settledLetterGrid() {
+  const grid = letterGrid();
+  if (drag?.source.type === 'board') grid[drag.source.k] = drag.tile.letter;
+  return grid;
+}
+
+function seedConfirmedValidity() {
+  if (!dict) return;
+  const { runs } = validate(settledLetterGrid(), dict);
+  confirmedRunStates = new Map(runs.map((run) => [runIdentity(run), run.valid]));
+  confirmedValiditySeeded = true;
+}
+
+function confirmValidity(runs) {
+  const next = new Map(runs.map((run) => [runIdentity(run), run.valid]));
+  if (!confirmedValiditySeeded) {
+    confirmedRunStates = next;
+    confirmedValiditySeeded = true;
+    return [];
+  }
+  const newlyValid = runs.filter(
+    (run) => run.valid && confirmedRunStates.get(runIdentity(run)) !== true,
+  );
+  confirmedRunStates = next;
+  return newlyValid;
+}
+
+function showValidHeartbeat(runs, playChime) {
+  clearTimeout(validFlashTimer);
+  $('plane').querySelectorAll('.valid-flash').forEach((el) => el.classList.remove('valid-flash'));
+  for (const cell of new Set(runs.flatMap((run) => run.cells))) {
+    $('plane').querySelector(`.tile[data-k="${cell}"]`)?.classList.add('valid-flash');
+  }
+  validFlashTimer = setTimeout(() => {
+    $('plane').querySelectorAll('.valid-flash').forEach((el) => el.classList.remove('valid-flash'));
+  }, 600);
+  if (playChime) sound.valid();
+
+  if (!currentBadRun) {
+    const msg = $('statusMsg');
+    const words = [...new Set(runs.map((run) => run.word))];
+    msg.className = 'status-msg good';
+    msg.setAttribute('aria-disabled', 'true');
+    msg.tabIndex = -1;
+    msg.textContent = words.length === 1 ? `“${words[0]}” is good ✓` : `${words.length} words work ✓`;
+    clearTimeout(validMessageTimer);
+    validMessageTimer = setTimeout(() => {
+      validMessageTimer = null;
+      if (status === 'playing' && !drag) paintValidity();
+    }, 800);
+  }
+}
+
+function positionBadRun(run) {
+  const outline = $('badRunOutline');
+  currentBadRun = run || null;
+  outline.classList.toggle('hidden', !run);
+  if (!run) return;
+  const cells = run.cells.map(parseKey);
+  const minX = Math.min(...cells.map((cell) => cell.x));
+  const maxX = Math.max(...cells.map((cell) => cell.x));
+  const minY = Math.min(...cells.map((cell) => cell.y));
+  const maxY = Math.max(...cells.map((cell) => cell.y));
+  outline.style.left = `${minX * CELL + 1}px`;
+  outline.style.top = `${minY * CELL + 1}px`;
+  outline.style.width = `${(maxX - minX + 1) * CELL - 2}px`;
+  outline.style.height = `${(maxY - minY + 1) * CELL - 2}px`;
+}
+
+function flashBadRun() {
+  if (!currentBadRun) return;
+  const outline = $('badRunOutline');
+  clearTimeout(badFlashTimer);
+  outline.classList.remove('flash');
+  void outline.offsetWidth;
+  outline.classList.add('flash');
+  badFlashTimer = setTimeout(() => outline.classList.remove('flash'), 420);
+}
+
+$('statusMsg').addEventListener('click', flashBadRun);
+
+function paintValidity({ confirmed = false } = {}) {
+  if (validMessageTimer) {
+    clearTimeout(validMessageTimer);
+    validMessageTimer = null;
+  }
   const grid = letterGrid();
   const count = Object.keys(grid).length;
   const msg = $('statusMsg');
   msg.className = 'status-msg';
+  msg.setAttribute('aria-disabled', 'true');
+  msg.tabIndex = -1;
   if (!dict) {
     msg.textContent = 'Boiling up the word list…';
+    positionBadRun(null);
     return;
   }
   const { runs, badCells } = validate(grid, dict);
-  $('plane').querySelectorAll('.tile').forEach((el) => {
-    el.classList.toggle('bad', badCells.has(el.dataset.k));
-  });
+  const bad = status === 'playing' ? runs.find((run) => !run.valid) : null;
+  positionBadRun(bad);
   const connected = isConnected(grid);
   const goodTiles = count - badCells.size;
   setBucket(status === 'done' ? 1 : (goodTiles / RACK_SIZE) * (connected ? 1 : 0.85));
   if (status === 'done') {
     msg.textContent = `Tapped in ${fmtPrecise(solveMs)} — see you at midnight 🍁`;
-    return;
-  }
-  if (status === 'gaveup') {
+  } else if (status === 'gaveup') {
     msg.textContent = 'Solution revealed — new letters at midnight 🍁';
-    return;
-  }
-  if (!started) {
+  } else if (!started) {
     msg.textContent = 'Drag a tile anywhere to start the clock';
-    return;
-  }
-  if (badCells.size > 0) {
-    const bad = runs.find((r) => !r.valid);
+  } else if (bad) {
     msg.classList.add('bad');
+    msg.setAttribute('aria-disabled', 'false');
+    msg.tabIndex = 0;
     msg.textContent = `“${bad.word}” isn't a word — rearrange!`;
   } else if (count >= 2 && !connected) {
     msg.classList.add('warn');
     msg.textContent = 'No islands — join everything into one crossword';
   } else if (tray.length > 0) {
     msg.textContent = `Looking good — ${tray.length} tile${tray.length === 1 ? '' : 's'} to go`;
+  }
+  if (confirmed) {
+    const newlyValid = confirmValidity(runs);
+    if (newlyValid.length > 0) {
+      showValidHeartbeat(newlyValid, !isSolved(grid, dict));
+    }
   }
 }
 
@@ -317,6 +445,7 @@ function startDrag(e, el, source) {
   }
   if (status !== 'playing' || dayRolledOver) return;
   e.preventDefault();
+  sound.pickup();
   const lift = e.pointerType === 'touch' ? 54 : 8;
   const ghost = el.cloneNode(true);
   ghost.className = 'tile drag-ghost';
@@ -362,16 +491,19 @@ function moveGhost(e) {
   const cursor = $('dropCursor');
   if (cell) {
     const k = key(cell.x, cell.y);
+    const blocked = placed[k] !== undefined;
     cursor.classList.remove('hidden');
-    cursor.classList.toggle('blocked', placed[k] !== undefined);
+    cursor.classList.toggle('blocked', blocked);
     cursor.style.left = `${cell.x * CELL + 2}px`;
     cursor.style.top = `${cell.y * CELL + 2}px`;
     cursor.style.width = `${CELL - 4}px`;
     cursor.style.height = `${CELL - 4}px`;
-    drag.cell = placed[k] === undefined ? cell : null;
+    drag.cell = blocked ? null : cell;
+    drag.blocked = blocked;
   } else {
     cursor.classList.add('hidden');
     drag.cell = null;
+    drag.blocked = false;
   }
 }
 
@@ -404,7 +536,7 @@ function onDragCancel(e) {
 
 function onDragEnd(e) {
   if (!isDragPointer(e)) return;
-  const { source, tile, cell, moved } = drag;
+  const { source, tile, cell, moved, blocked } = drag;
   if (!moved) {
     if (source.type === 'board') placed[source.k] = tile;
     endDragCleanup();
@@ -427,41 +559,64 @@ function onDragEnd(e) {
   // (tray→tray drop: nothing changed)
   renderTray();
   renderBoardTiles();
+  if (cell) {
+    sound.snap();
+    $('plane').querySelector(`.tile[data-k="${key(cell.x, cell.y)}"]`)?.classList.add('pop');
+  } else if (blocked) {
+    sound.reject();
+  }
   updateFit();
-  paintValidity();
+  paintValidity({ confirmed: true });
   checkWin();
   save();
 }
 
 // ------------------------------------------------------------ win
-function checkWin() {
+function checkWin({ effects = true } = {}) {
   if (status !== 'playing' || !dict) return;
   if (!isSolved(letterGrid(), dict)) return;
   status = 'done';
   solveMs = elapsedMs;
+  const previousBestMs = TEST_DATE ? 0 : (loadStats().best || 0);
+  newBestThisSolve = previousBestMs > 0 && solveMs < previousBestMs;
   renderTimer();
   paintValidity();   // swap the status line to the tapped message
   save();
   recordStats();
-  celebrate();
+  if (effects) celebrate(newBestThisSolve);
   onDuelFinish(false); // no-op outside a race
-  if (!duelActive()) setTimeout(() => showResults(true), 1900);
+  if (!duelActive()) setTimeout(() => showResults(true), effects ? 1900 : 0);
 }
 
-function celebrate() {
+let celebrationTimer = null;
+function celebrate(isNewBest) {
   setBucket(1);
+  sound.win();
   $('drip').classList.remove('hidden');
   const banner = $('tapped');
   banner.classList.remove('hidden');
   banner.classList.add('show');
+  const stamp = $('newBestStamp');
+  stamp.classList.toggle('hidden', !isNewBest);
+  stamp.classList.toggle('show', isNewBest);
+  clearTimeout(celebrationTimer);
+  celebrationTimer = setTimeout(() => {
+    banner.classList.add('hidden');
+    banner.classList.remove('show');
+    stamp.classList.add('hidden');
+    stamp.classList.remove('show');
+  }, 1600);
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // tile wave
   const tiles = [...$('plane').querySelectorAll('.tile')];
   tiles.sort((p, q) => parseFloat(p.style.left) - parseFloat(q.style.left));
-  tiles.forEach((el, i) => setTimeout(() => el.classList.add('wave'), i * 45));
+  if (!reducedMotion) {
+    tiles.forEach((el, i) => setTimeout(() => el.classList.add('wave'), i * 45));
+  }
   // falling leaves
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < (reducedMotion ? 0 : 36); i++) {
     const leaf = document.createElement('div');
-    leaf.className = 'leaf';
+    leaf.className = `leaf${isNewBest ? ' gold' : ''}`;
     leaf.textContent = ['🍁', '🍂', '🍁'][i % 3];
     leaf.style.left = `${Math.random() * 100}vw`;
     leaf.style.fontSize = `${16 + Math.random() * 22}px`;
@@ -588,7 +743,7 @@ function showResults(fresh) {
     $('resultHead').textContent = `TAPPED in ${fmtPrecise(solveMs)}! 🍁`;
     const s = loadStats();
     $('resultSub').textContent =
-      s.best && solveMs === s.best && s.solved > 1 ? 'A new personal best!' :
+      fresh && newBestThisSolve ? 'A new personal best!' :
       `Personal best: ${s.best ? fmtPrecise(s.best) : '–'}`;
     $('finishedRow').classList.remove('hidden');
     clearInterval(countdownTimer);
