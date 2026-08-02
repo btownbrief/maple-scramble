@@ -120,6 +120,35 @@ t(guest.others()[0].left === true, 'guest sees the host bailed');
 await expectCode(guest.submitResult({ ms: 50000, points: 31000 }), 'opponent_left',
   'submit into an abandoned race says why');
 
+/* --------------------------------------------- 3-racer heat (group duel) */
+
+device('A');
+const h3 = await Duel.create({ game: GAME, name: 'Ada', payload: { date: '2027-09-09' }, seats: 3 });
+t(h3.status === 'waiting' && h3.match.maxSeats === 3, '3-seat heat opens, maxSeats tracked');
+device('B');
+const g3b = await Duel.join({ game: GAME, code: h3.code, name: 'Bea' });
+t(g3b.status === 'waiting', 'second racer seated, still waiting');
+device('C');
+const g3c = await Duel.join({ game: GAME, code: h3.code, name: 'Cal' });
+t(g3c.status === 'playing' && g3c.match.maxSeats === 3, 'third racer fills the heat — race on');
+
+device('A'); await h3.match._fetch();
+const subA = h3.submitResult({ ms: 50000, points: 36000 - 500 });
+device('B');
+const subB = g3b.submitResult({ ms: 41000, points: 36000 - 410 });
+await Promise.all([subA, subB]);
+device('C');
+await g3c.match._fetch();
+t(!g3c.isComplete(), 'two of three in — heat still open');
+await g3c.submitResult({ gaveUp: true });
+device('A'); await h3.match._fetch();
+device('B'); await g3b.match._fetch();
+t(h3.isComplete() && g3b.isComplete() && h3.status === 'over', 'all three results merged, heat over');
+const standings = h3.others().map((o) => [o.name, o.result.gaveUp ? 'peek' : o.result.ms]);
+t(JSON.stringify(standings.sort()) === JSON.stringify([['Bea', 41000], ['Cal', 'peek']].sort()),
+  'host sees the full field (Bea 41s, Cal peeked)');
+t(g3b.others().every((o) => o.result), 'winner sees everyone in too');
+
 shim.server.close();
 console.log(`\nALL DUEL TESTS PASSED (${passed} checks)`);
 process.exit(0);

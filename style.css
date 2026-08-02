@@ -618,3 +618,25 @@ footer a, .fleet-credit a { color: var(--accent); text-decoration: none; }
 }
 .duel-row.win { background: var(--panel-2, #f3e7cd); }
 .duel-row .duel-time { font-variant-numeric: tabular-nums; }
+
+/* group duels: seat picker + lobby roster */
+.seat-btns { display: flex; gap: 8px; justify-content: center; }
+.seat-btn {
+  flex: 1;
+  max-width: 64px;
+  padding: 10px 0;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 800;
+  color: inherit;
+  background: var(--panel, #fff);
+  border: 2px solid var(--line, #d9c9a8);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.seat-btn.selected {
+  border-color: var(--maple, #d97516);
+  background: var(--panel-2, #f3e7cd);
+}
+#lobbyList { font-weight: 700; font-size: 14px; padding: 2px 0 4px; }
+#lobbyList .chair-empty { opacity: 0.45; }

@@ -1028,6 +1028,18 @@ function duelFriendly(err) {
 }
 
 let duelPanelIntent = 'host';
+let duelSeats = 2;
+
+document.querySelectorAll('#opSeats .seat-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    duelSeats = +btn.dataset.seats;
+    document.querySelectorAll('#opSeats .seat-btn').forEach((b) => {
+      const sel = b === btn;
+      b.classList.toggle('selected', sel);
+      b.setAttribute('aria-pressed', String(sel));
+    });
+  });
+});
 
 $('duelBtn').addEventListener('click', () => {
   refreshDuelRejoin();
@@ -1054,6 +1066,7 @@ function openDuelPanel(intent) {
   $('opTitle').textContent = intent === 'host' ? 'Start a race' : 'Join a race';
   $('opGo').textContent = intent === 'host' ? 'Get a code' : 'Race!';
   $('opCodeWrap').classList.toggle('hidden', intent === 'host');
+  $('opSeatsWrap').classList.toggle('hidden', intent !== 'host');
   $('opError').classList.add('hidden');
   $('opName').value = $('opName').value || duelGetName();
   $('onlinePanel').classList.remove('hidden');
@@ -1074,7 +1087,7 @@ async function duelGo() {
   try {
     if (duelPanelIntent === 'host') {
       const d = await Duel.create({
-        game: DUEL_GAME, name, payload: { date: randomDuelDate() },
+        game: DUEL_GAME, name, payload: { date: randomDuelDate() }, seats: duelSeats,
       });
       $('onlinePanel').classList.add('hidden');
       openDuelLobby(d);
@@ -1101,13 +1114,29 @@ function openDuelLobby(d) {
   if ($('lobby')._duel && $('lobby')._duel !== d) $('lobby')._duel.stop();
   $('lobby')._duel = d;
   $('lobbyCode').textContent = d.code;
+  renderLobbyRoster(d);
   $('lobby').classList.remove('hidden');
   d.start({
     onChange: () => {
+      renderLobbyRoster(d);
       if (d.status !== 'waiting') location.href = duelUrl(d.payload.date);
     },
     onError: () => {}, // lobby hiccups resolve on the next poll
   });
+}
+
+function renderLobbyRoster(d) {
+  const box = $('lobbyList');
+  box.textContent = '';
+  const seated = d.match.seats || [];
+  const total = d.match.maxSeats || seated.length || 2;
+  for (let i = 0; i < total; i++) {
+    const span = document.createElement('span');
+    const who = seated[i];
+    span.textContent = (i ? ' · ' : '') + (who ? who.name : 'open chair');
+    if (!who) span.className = 'chair-empty';
+    box.appendChild(span);
+  }
 }
 
 function cancelDuelLobby() {
@@ -1159,43 +1188,54 @@ function duelOpponent() {
 
 function renderDuelBar() {
   if (!duel) return;
-  const opp = duelOpponent();
+  const rivals = duel.others();
   const bar = $('duelBar');
   bar.classList.remove('hidden');
-  const who = opp.name ? `vs ${opp.name}` : 'waiting for your rival';
+  const who = rivals.length
+    ? `vs ${rivals.map((r) => r.name).join(' + ')}`
+    : 'waiting for your rivals';
   let note = '';
-  if (opp.left && !duel.isComplete()) note = ' — they bailed! Solve it for glory.';
-  else if (duelSubmitted && !duel.isComplete()) note = ' — waiting on their time…';
+  if (rivals.length && rivals.every((r) => r.left) && !duel.isComplete()) {
+    note = ' — they all bailed! Solve it for glory.';
+  } else if (duelSubmitted && !duel.isComplete()) {
+    const out = rivals.filter((r) => !r.result && !r.left).map((r) => r.name);
+    note = out.length ? ` — waiting on ${out.join(' + ')}…` : '';
+  }
   bar.textContent = `⚔️ RACE ${duel.code} ${who}${note}`;
 }
 
 function showDuelDone() {
   duel.stop();
-  const mine = duel.myResult();
-  const opp = duelOpponent();
-  const theirs = opp.result;
   const fmt = (r) => (!r || r.gaveUp ? 'peeked 👀' : fmtPrecise(r.ms));
-  const bothPeeked = !!(mine && mine.gaveUp && theirs && theirs.gaveUp);
-  const iWin = (mine && !mine.gaveUp) && (!theirs || theirs.gaveUp || mine.ms < theirs.ms);
-  const tie = bothPeeked ||
-    (mine && theirs && !mine.gaveUp && !theirs.gaveUp && mine.ms === theirs.ms);
+  // Standings: real solves by time, then peekers; win = fastest real solve.
+  const field = [
+    { label: 'You', me: true, result: duel.myResult() },
+    ...duel.others().map((o) => ({ label: o.name || 'Rival', me: false, result: o.result })),
+  ].sort((a, b) => {
+    const ap = !a.result || a.result.gaveUp, bp = !b.result || b.result.gaveUp;
+    if (ap !== bp) return ap - bp;
+    return ap ? 0 : a.result.ms - b.result.ms;
+  });
+  const best = field[0];
+  const everyonePeeked = field.every((f) => !f.result || f.result.gaveUp);
+  const winners = everyonePeeked ? [] : field.filter(
+    (f) => f.result && !f.result.gaveUp && f.result.ms === best.result.ms,
+  );
   $('duelDoneHead').textContent =
-    bothPeeked ? 'BOTH PEEKED — CALL IT A DRAW 👀'
-    : tie ? 'DEAD HEAT! 🍁'
-    : iWin ? 'YOU WIN THE RACE! 🏆' : `${(opp.name || 'THEY').toUpperCase()} TAKES IT`;
+    everyonePeeked ? 'EVERYONE PEEKED — CALL IT A DRAW 👀'
+    : winners.length > 1 ? 'DEAD HEAT! 🍁'
+    : winners[0].me ? 'YOU WIN THE RACE! 🏆'
+    : `${winners[0].label.toUpperCase()} TAKES IT`;
   const rows = $('duelDoneRows');
   rows.innerHTML = '';
-  for (const [label, r, win] of [
-    ['You', mine, iWin || tie],
-    [opp.name || 'Rival', theirs, (!iWin && !tie) || tie],
-  ]) {
+  for (const f of field) {
     const row = document.createElement('div');
-    row.className = 'duel-row' + (win ? ' win' : '');
+    row.className = 'duel-row' + (winners.includes(f) ? ' win' : '');
     const name = document.createElement('span');
-    name.textContent = label;
+    name.textContent = f.label;
     const time = document.createElement('span');
     time.className = 'duel-time';
-    time.textContent = fmt(r);
+    time.textContent = fmt(f.result);
     row.append(name, time);
     rows.appendChild(row);
   }
