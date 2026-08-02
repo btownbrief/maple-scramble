@@ -188,6 +188,14 @@
       <h2 id="opTitle">Start a race</h2>
       <label class="duel-label" for="opName">Your name</label>
       <input class="duel-input" id="opName" maxlength="24" autocomplete="nickname" placeholder="Sprinter" />
+      <div id="opSeatsWrap">
+        <label class="duel-label">Racers in this heat</label>
+        <div id="opSeats" class="seat-btns" role="group" aria-label="Racers in this heat">
+          <button class="seat-btn selected" data-seats="2" aria-pressed="true">2</button>
+          <button class="seat-btn" data-seats="3" aria-pressed="false">3</button>
+          <button class="seat-btn" data-seats="4" aria-pressed="false">4</button>
+        </div>
+      </div>
       <div id="opCodeWrap" class="hidden">
         <label class="duel-label" for="opCode">Race code</label>
         <input class="duel-input duel-code" id="opCode" maxlength="4" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABCD" />
@@ -202,8 +210,9 @@
     <div class="modal small-modal">
       <h2>Read this code to your rival</h2>
       <div id="lobbyCode"></div>
+      <div id="lobbyList"></div>
       <p class="fine">They tap ⚔️ → <b>Join a race</b> and type it in.
-        The moment they do, both boards open.</p>
+        When the last chair fills, every board opens at once.</p>
       <button class="tab" id="lobbyCancel">Call it off</button>
     </div>
   </div>
