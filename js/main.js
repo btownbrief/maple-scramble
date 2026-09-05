@@ -1315,3 +1315,32 @@ async function duelRematch() {
 
 void bootDuel();
 refreshDuelRejoin();
+
+/* ------------------------------------------------- race-link invites */
+// Text a link instead of reading letters aloud: ?join=ABCD opens the join
+// panel with the code filled in, then scrubs the URL so refreshes don't
+// re-trigger it.
+
+$('inviteBtn').addEventListener('click', async () => {
+  const d = $('lobby')._duel;
+  if (!d) return;
+  const url = `${location.origin}${location.pathname}?join=${d.code}`;
+  const text = `Race me on today's Maple Scramble board! 🍁 Tap to join: ${url}`;
+  try {
+    if (navigator.share && /Mobi|Android|iPhone|iPad/.test(navigator.userAgent)) {
+      await navigator.share({ text });
+    } else {
+      await navigator.clipboard.writeText(url);
+      $('inviteBtn').textContent = '✓ Link copied';
+      setTimeout(() => { $('inviteBtn').textContent = '📲 Send an invite'; }, 1800);
+    }
+  } catch { /* share sheet closed */ }
+});
+
+(() => {
+  const code = new URLSearchParams(location.search).get('join');
+  if (!code || !/^[A-Za-z0-9]{4}$/.test(code)) return;
+  history.replaceState(null, '', location.pathname);
+  openDuelPanel('join');
+  $('opCode').value = code.toUpperCase();
+})();
