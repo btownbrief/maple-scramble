@@ -70,3 +70,9 @@ live, and add test-duel.mjs to the before-you-finish list.
 Same one-paste Supabase setup as the board games (PR #8 on
 btownbrief.github.io). Duels self-register by slug; until the SQL is
 pasted, clients get `not_ready` and the UI says races aren't switched on.
+
+## 6. Race-link invites (added 2026-08-02)
+
+Same rule as ROOMS-INTEGRATION.md §6: lobby "send an invite" button
+sharing `?join=CODE`; on load a valid `?join=` prefills the join panel and
+is scrubbed from the URL. Reference: the end of this repo's js/main.js.
